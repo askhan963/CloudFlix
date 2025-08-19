@@ -10,8 +10,9 @@
     "migrate": "tsx src/db/migrate.ts",
     "migrate:status": "tsx src/db/migrate.ts --status"
   },
+  "engines": { "node": ">=18 <=22" },
   "keywords": [],
-  "author": "",
+  "author": "askhan963",
   "license": "ISC",
   "type": "module",
   "dependencies": {
