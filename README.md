@@ -18,7 +18,7 @@ A scalable backend for the CloudFlix project, built with **Node.js**, **Express*
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/your-username/cloudflix-backend.git
+git clone https://github.com/askhan963/CloudFlix.git
 cd cloudflix-backend
 ````
 
@@ -91,7 +91,7 @@ src/
 ## 📡 API Endpoints (so far)
 
 * `GET /api` → Base API check
-* `GET /api/v1/health` → Health check endpoint
+* `GET /api/health` → Health check endpoint
 
 More modules (Auth, Users, Videos, etc.) coming soon.
 
