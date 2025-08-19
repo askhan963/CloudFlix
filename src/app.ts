@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { httpLogger } from './middleware/logger.js';
 import healthRoutes from './routes/health.routes.js';
+import authRoutes from './routes/auth.routes.js';
 import { ensureContainer } from './storage/blob.js';
 import { notFound, errorHandler } from './middleware/errors.js';
 
@@ -20,6 +21,7 @@ app.use(httpLogger);
 // routes
 app.get('/api', (_req, res) => res.json({ ok: true, name: 'CloudFlix API' }));
 app.use('/api/health', healthRoutes);
+app.use('/api/auth', authRoutes);
 
 // boot tasks (don’t await here; just start)
 ensureContainer().catch(() => { /* logged by pino-http on use */ });
