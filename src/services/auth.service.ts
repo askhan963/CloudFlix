@@ -4,6 +4,8 @@ import { hashPassword, verifyPassword } from '../utils/password.js';
 import { signAccessToken, createRefreshToken } from '../utils/tokens.js';
 import { createSession, findSessionByToken, revokeSession } from './sessions.service.js';
 
+type PublicUser = { id: number; username: string; role: 'creator'|'consumer' };
+
 export async function signup(username: string, password: string, role: 'creator'|'consumer', email?: string) {
   username = username.toLowerCase();
   const pwHash = await hashPassword(password);
@@ -17,7 +19,7 @@ export async function signup(username: string, password: string, role: 'creator'
 export async function login(usernameOrEmail: string, password: string, ua?: string, ip?: string) {
   const q = usernameOrEmail.toLowerCase();
   const [rows] = await pool.execute<RowDataPacket[]>(
-    'SELECT * FROM users WHERE username=? OR email=? LIMIT 1',
+    'SELECT id, username, role, password_hash FROM users WHERE username=? OR email=? LIMIT 1',
     [q, q]
   );
   const user = rows[0];
@@ -26,29 +28,38 @@ export async function login(usernameOrEmail: string, password: string, ua?: stri
   const ok = await verifyPassword(password, user.password_hash);
   if (!ok) throw new Error('Invalid credentials');
 
-  const accessToken = signAccessToken({ id: user.id, username: user.username, role: user.role });
+  const publicUser: PublicUser = { id: user.id, username: user.username, role: user.role };
+  const accessToken = signAccessToken(publicUser);
   const refreshToken = createRefreshToken();
   const sessionId = await createSession(user.id, refreshToken, ua, ip);
 
-  return {
-    user: { id: user.id, username: user.username, role: user.role },
-    accessToken,
-    refreshToken,
-    sessionId
-  };
+  return { user: publicUser, accessToken, refreshToken, sessionId };
 }
 
 export async function refresh(userId: number, refreshToken: string, ua?: string, ip?: string) {
   const session = await findSessionByToken(userId, refreshToken);
   if (!session) throw new Error('Invalid refresh');
 
-  // rotate: revoke old + issue new
+  // rotate old session
   await revokeSession(session.id);
-  const accessToken = signAccessToken({ id: userId, username: session.username ?? '', role: session.role ?? 'consumer' } as any);
+
+  // fetch user again to sign
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    'SELECT id, username, role FROM users WHERE id=? LIMIT 1',
+    [userId]
+  );
+  const u = rows[0];
+  if (!u) throw new Error('User not found');
+
+  const publicUser: PublicUser = { id: u.id, username: u.username, role: u.role };
+  const accessToken = signAccessToken(publicUser);
+
   const newRefresh = createRefreshToken();
-  const newSessionId = await createSession(userId, newRefresh, ua, ip);
-  return { accessToken, refreshToken: newRefresh, sessionId: newSessionId };
+  const newSessionId = await createSession(u.id, newRefresh, ua, ip);
+
+  return { user: publicUser, accessToken, refreshToken: newRefresh, sessionId: newSessionId };
 }
+
 export async function logout(userId: number, refreshToken: string) {
   const session = await findSessionByToken(userId, refreshToken);
   if (session) await revokeSession(session.id);
