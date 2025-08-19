@@ -30,9 +30,32 @@ export async function createVideo({
 
 export async function getVideoByIdForViewer(id: number, viewerUserId?: number|null) {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT * FROM videos WHERE id=? AND deleted_at IS NULL`,
+    `SELECT
+        v.id,
+        v.title,
+        v.description,
+        v.genre,
+        v.producer,
+        v.age_rating,
+        v.visibility,
+        v.uploader_id,
+        v.blob_url,
+        v.created_at,
+        v.updated_at,
+        COALESCE(ra.avg_rating, 0)    AS avg_rating,
+        COALESCE(ra.rating_count, 0) AS rating_count
+     FROM videos v
+     LEFT JOIN (
+        SELECT video_id,
+               ROUND(AVG(rating), 2) AS avg_rating,
+               COUNT(*)              AS rating_count
+        FROM ratings
+        GROUP BY video_id
+     ) ra ON ra.video_id = v.id
+     WHERE v.id = ? AND v.deleted_at IS NULL`,
     [id]
   );
+
   const v = rows[0];
   if (!v) return null;
 
@@ -43,40 +66,41 @@ export async function getVideoByIdForViewer(id: number, viewerUserId?: number|nu
 
 
 
+
 export async function listVideosForViewer({
   q, genre, uploaderId, visibility, page = 1, limit = 20, viewerUserId
 }: {
   q?: string; genre?: string; uploaderId?: number; visibility?: Visibility;
   page?: number; limit?: number; viewerUserId?: number | null;
 }) {
-  const where: string[] = ['deleted_at IS NULL'];
+  const where: string[] = ['v.deleted_at IS NULL'];
   const args: any[] = [];
 
-  // Visibility defaults: public OR own
+  // visibility rules
   if (!visibility) {
-    where.push('(visibility = ? OR uploader_id = ?)');
+    where.push('(v.visibility = ? OR v.uploader_id = ?)');
     args.push('public', viewerUserId ?? -1);
   } else if (visibility === 'public') {
-    where.push('visibility = ?'); args.push('public');
+    where.push('v.visibility = ?'); args.push('public');
   } else if (visibility === 'unlisted') {
-    where.push('visibility = ? AND uploader_id = ?'); args.push('unlisted', viewerUserId ?? -1);
+    where.push('v.visibility = ? AND v.uploader_id = ?'); args.push('unlisted', viewerUserId ?? -1);
   } else if (visibility === 'private') {
-    where.push('visibility = ? AND uploader_id = ?'); args.push('private', viewerUserId ?? -1);
+    where.push('v.visibility = ? AND v.uploader_id = ?'); args.push('private', viewerUserId ?? -1);
   }
 
   if (q && q.trim()) {
     const like = `%${q.trim()}%`;
-    where.push('(title LIKE ? OR description LIKE ? OR genre LIKE ? OR producer LIKE ?)');
+    where.push('(v.title LIKE ? OR v.description LIKE ? OR v.genre LIKE ? OR v.producer LIKE ?)');
     args.push(like, like, like, like);
   }
 
   if (genre && genre.trim()) {
-    where.push('genre = ?');
+    where.push('v.genre = ?');
     args.push(genre.trim());
   }
 
   if (uploaderId) {
-    where.push('uploader_id = ?');
+    where.push('v.uploader_id = ?');
     args.push(uploaderId);
   }
 
@@ -86,27 +110,41 @@ export async function listVideosForViewer({
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  // (Temporary) debug to console to see args alignment
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[videos.list] whereSql =', whereSql);
-    console.log('[videos.list] args =', args);
-    console.log('[videos.list] page/limit/offset =', pageNum, limitNum, offsetNum);
-  }
-
-  // 1) Count
+  // Count (from videos only)
   const [countRows] = await pool.query<RowDataPacket[]>(
-    `SELECT COUNT(*) AS total FROM videos ${whereSql}`,
+    `SELECT COUNT(*) AS total
+     FROM videos v
+     ${whereSql}`,
     args
   );
   const total = Number((countRows as any)[0]?.total || 0);
 
-  // 2) Data (interpolate LIMIT/OFFSET as numbers to avoid ER_WRONG_ARGUMENTS)
+  // Data with avg rating via LEFT JOIN subquery
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT id, title, description, genre, producer, age_rating, visibility,
-            uploader_id, blob_url, created_at, updated_at
-     FROM videos
+    `SELECT
+        v.id,
+        v.title,
+        v.description,
+        v.genre,
+        v.producer,
+        v.age_rating,
+        v.visibility,
+        v.uploader_id,
+        v.blob_url,
+        v.created_at,
+        v.updated_at,
+        COALESCE(ra.avg_rating, 0)    AS avg_rating,
+        COALESCE(ra.rating_count, 0) AS rating_count
+     FROM videos v
+     LEFT JOIN (
+        SELECT video_id,
+               ROUND(AVG(rating), 2) AS avg_rating,
+               COUNT(*)              AS rating_count
+        FROM ratings
+        GROUP BY video_id
+     ) ra ON ra.video_id = v.id
      ${whereSql}
-     ORDER BY created_at DESC
+     ORDER BY v.created_at DESC
      LIMIT ${limitNum} OFFSET ${offsetNum}`,
     args
   );
